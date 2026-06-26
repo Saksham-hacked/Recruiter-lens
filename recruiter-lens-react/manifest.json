@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Recruiter Lens",
+  "version": "1.0.0",
+  "description": "Check and add candidates to Zoho Recruit while browsing LinkedIn, Indeed, and Juicebox",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://linkedin.com/*",
+    "https://in.indeed.com/*",
+    "https://www.indeed.com/*",
+    "https://app.juicebox.ai/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.linkedin.com/in/*",
+        "https://linkedin.com/in/*",
+        "https://in.indeed.com/resume/*",
+        "https://www.indeed.com/resume/*",
+        "https://app.juicebox.ai/*"
+      ],
+      "js": ["dist/contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": "icons/icon-48.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recruiter Lens</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="header">
+    <svg class="logo" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
+    </svg>
+    <span class="title">Recruiter Lens</span>
+  </div>
+
+  <div class="section" id="status-section">
+    <div class="status-row">
+      <span class="dot" id="status-dot"></span>
+      <span class="status-text" id="status-text">Checking backend…</span>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section" id="lookup-section">
+    <p class="lookup-label">Last Profile Checked</p>
+    <p class="lookup-value" id="lookup-value">Open a candidate profile to begin</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="section footer">
+    <p class="hint">Works on LinkedIn · Indeed · Juicebox</p>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
