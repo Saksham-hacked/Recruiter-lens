@@ -11,17 +11,22 @@ const router = express.Router();
  * Response: { found: true, candidate: {...} } | { found: false }
  */
 router.post('/', async (req, res) => {
-  const { email, phone, linkedinUrl } = req.body;
+  const { email, phone, linkedinUrl, firstName, lastName, currentEmployer } = req.body;
 
-  // Validate: at least one identifier must be present
-  if (!email && !phone && !linkedinUrl) {
+  const hasPrimaryIdentifier = !!(email || phone || linkedinUrl);
+  const hasFallbackIdentifier = !!(firstName && lastName);
+
+  // Validate: at least one primary identifier, OR a first+last name fallback
+  // (used by platforms like Indeed Smart Sourcing that don't expose
+  // email/phone/linkedinUrl on the search results view).
+  if (!hasPrimaryIdentifier && !hasFallbackIdentifier) {
     return res.status(400).json({
       error: 'At least one of email, phone, or linkedinUrl is required.',
     });
   }
 
   try {
-    const result = await searchCandidate({ email, phone, linkedinUrl });
+    const result = await searchCandidate({ email, phone, linkedinUrl, firstName, lastName, currentEmployer });
     return res.json(result);
   } catch (err) {
     console.error(`[${new Date().toISOString()}] /lookup error:`, err.message);

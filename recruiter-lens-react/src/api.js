@@ -24,35 +24,23 @@ function callBackground(type, payload = {}) {
 }
 
 export const lookupAPI = {
-  async searchCandidate({ email, phone, linkedinUrl, platform }) {
-    return callBackground(MESSAGE_TYPES.LOOKUP, { email, phone, linkedinUrl, platform });
+  async searchCandidate(lookupPayload) {
+    // Pass the full payload through (email/phone/linkedinUrl plus optional
+    // fallback identifiers firstName/lastName/currentEmployer). Platforms
+    // that already send email/phone/linkedinUrl are unaffected — those fields
+    // are still read first by the backend. This only stops silently dropping
+    // the fallback fields for platforms (Indeed Smart Sourcing) that don't
+    // have email/phone/linkedinUrl available.
+    return callBackground(MESSAGE_TYPES.LOOKUP, lookupPayload);
     // Returns { found, candidate? }
   },
 };
 
 export const candidateAPI = {
-  async addCandidate({
-    firstName,
-    lastName,
-    email,
-    phone,
-    currentEmployer,
-    currentTitle,
-    linkedinUrl,
-    source,
-    notes,
-  }) {
-    return callBackground(MESSAGE_TYPES.ADD_CANDIDATE, {
-      firstName,
-      lastName,
-      email,
-      phone,
-      currentEmployer,
-      currentTitle,
-      linkedinUrl,
-      source,
-      notes,
-    });
+  async addCandidate(candidatePayload) {
+    // Pass the entire payload through — includes both core form fields
+    // and rich parsed data (skills, experience, education, etc.)
+    return callBackground(MESSAGE_TYPES.ADD_CANDIDATE, candidatePayload);
     // Returns { success, action, candidateId, zohoRecordUrl, pdfAttached, noteCreated }
   },
 };

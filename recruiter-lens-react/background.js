@@ -14,8 +14,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       switch (msg.type) {
 
         case "LOOKUP": {
-          const { email, phone, linkedinUrl, platform } = msg.payload;
-          console.log("[Recruiter Lens] Lookup request sent:", { email, phone, linkedinUrl, platform });
+          const { email, phone, linkedinUrl, platform, firstName, lastName, currentEmployer } = msg.payload;
+          console.log("[Recruiter Lens] Lookup request sent:", { email, phone, linkedinUrl, platform, firstName, lastName, currentEmployer });
 
           const res = await fetch(`${BACKEND_URL}/lookup`, {
             method: "POST",
@@ -23,7 +23,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               "Content-Type": "application/json",
               "X-API-Key": API_KEY,
             },
-            body: JSON.stringify({ email, phone, linkedinUrl, platform }),
+            body: JSON.stringify({ email, phone, linkedinUrl, platform, firstName, lastName, currentEmployer }),
           });
 
           if (!res.ok) {

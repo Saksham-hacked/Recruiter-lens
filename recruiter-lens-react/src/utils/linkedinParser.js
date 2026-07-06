@@ -93,6 +93,158 @@ function parseListItems(section) {
 // MAIN PARSER
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SDUI SECTION PARSERS  (new LinkedIn desktop — obfuscated utility classes)
+// Anchored on stable componentkey suffixes; fields classified by text pattern.
+// Verified against real profile DOM (no speculative selectors).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const SDUI_DATE = /([A-Za-z]{3,9}\s+\d{4}|\d{4})\s*[-–]\s*(Present|[A-Za-z]{3,9}\s+\d{4}|\d{4})/;
+const SDUI_TENURE = /^\d+\s*yrs?(\s+\d+\s*mos?)?$|^\d+\s*mos?$/i;
+const SDUI_TYPES = new Set([
+  "Full-time", "Part-time", "Self-employed", "Freelance",
+  "Contract", "Internship", "Apprenticeship", "Seasonal",
+]);
+
+/** Get an SDUI profile section <section> by its stable componentkey suffix */
+function sduiSection(suffix) {
+  return document.querySelector(`section[componentkey$="${suffix}"]`);
+}
+
+/** Ordered, de-duped visible text lines within a node (skips UI chrome) */
+function sduiLines(root) {
+  if (!root) return [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const out = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    const t = node.textContent.replace(/\s+/g, " ").trim();
+    if (!t || t === "·") continue;
+    if (/^(more|…|see more|show all.*|endorsed by.*|show credential.*)$/i.test(t)) continue;
+    if (out.length && out[out.length - 1] === t) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+function sduiIsLocation(t) {
+  return t.includes(",") && t.length < 60 && !SDUI_DATE.test(t) && !SDUI_TENURE.test(t);
+}
+
+/** EXPERIENCE — segment the section's line-stream by date lines, carrying company
+ *  context so grouped (multi-role) companies and single entries both parse. */
+function parseSduiExperience() {
+  const section = sduiSection("ExperienceTopLevelSection");
+  if (!section) return [];
+  let lines = sduiLines(section);
+  if (lines[0] === "Experience") lines = lines.slice(1);
+
+  const roles = [];
+  let pending = [], curCo = null, curLoc = null, pType = null;
+
+  const close = (dateLine) => {
+    let title = null, company = curCo, location = curLoc, selfContained = false;
+    if (pending.length >= 2) {
+      title = pending[pending.length - 2];
+      company = pending[pending.length - 1];
+      location = null; selfContained = true;
+    } else if (pending.length === 1) {
+      title = pending[0];
+    }
+    const dm = dateLine.split("·");
+    roles.push({
+      title,
+      company,
+      dateRange: dm[0].trim(),
+      duration: dm[1] ? dm[1].trim() : null,
+      employmentType: pType,
+      location,
+      description: [],
+      companyLogoUrl: null,
+    });
+    pending = []; pType = null;
+    if (selfContained) { curCo = null; curLoc = null; }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const L = lines[i];
+    if (L.startsWith("•")) {                       // bullets FIRST (may contain year ranges)
+      if (roles.length) roles[roles.length - 1].description.push(L);
+      continue;
+    }
+    if (SDUI_TENURE.test(L)) {                     // grouped-company tenure → company header above it
+      if (pending.length) curCo = pending[pending.length - 1];
+      curLoc = null; pending = [];
+      if (lines[i + 1] && sduiIsLocation(lines[i + 1])) { curLoc = lines[i + 1]; i++; }
+      continue;
+    }
+    if (SDUI_TYPES.has(L)) { pType = L; continue; }
+    if (SDUI_DATE.test(L)) {
+      close(L);
+      const nx = lines[i + 1];
+      if (nx && sduiIsLocation(nx) && !SDUI_TYPES.has(nx) && !nx.startsWith("•")) {
+        roles[roles.length - 1].location = nx; i++;
+      }
+      continue;
+    }
+    pending.push(L);
+  }
+
+  for (const r of roles) {
+    r.description = r.description.length ? r.description.join("\n") : null;
+  }
+  return roles.filter((r) => r.title || r.company);
+}
+
+/** EDUCATION — triples of [school, degree, years] segmented by year lines */
+function parseSduiEducation() {
+  const section = sduiSection("EducationTopLevelSection");
+  if (!section) return [];
+  let lines = sduiLines(section);
+  if (lines[0] === "Education") lines = lines.slice(1);
+
+  const YEAR = /\b(19|20)\d{2}\b/;
+  const items = [];
+  let buf = [];
+  for (const L of lines) {
+    if (YEAR.test(L)) {
+      const school = buf[0] || null;
+      const degree = buf.slice(1).join(", ") || null;
+      if (school) items.push({ school, degree, fieldOfStudy: null, dateRange: L, schoolLogoUrl: null });
+      buf = [];
+    } else {
+      buf.push(L);
+    }
+  }
+  return items;
+}
+
+/** SKILLS — collect skill-name lines (LinkedIn truncates the inline list) */
+function parseSduiSkills() {
+  const section = sduiSection("Skills");
+  if (!section) return [];
+  const out = [];
+  const seen = new Set();
+  for (const L of sduiLines(section)) {
+    if (/^skills(\s*\(\d+\))?$/i.test(L)) continue;          // header "Skills (31)"
+    if (/passed|assessment|endorsement/i.test(L)) continue;
+    if (L.length < 2 || L.length > 60) continue;
+    if (seen.has(L)) continue;
+    seen.add(L); out.push(L);
+  }
+  return out;
+}
+
+/** ABOUT — full summary text from the SDUI expandable box */
+function sduiAbout() {
+  const section = sduiSection("About");
+  if (!section) return null;
+  const box = section.querySelector('[data-testid="expandable-text-box"]');
+  const t = (box || section).textContent.replace(/\s+/g, " ").trim();
+  if (!t || /^about$/i.test(t)) return null;
+  return t.replace(/^About\s*/i, "").trim();
+}
+
 export function parseLinkedIn() {
   let nameEl = null;
   let titleEl = null;
@@ -180,7 +332,7 @@ export function parseLinkedIn() {
   }
   // SDUI fallback: location is often in a <span> near connections text
   if (!location && topCard) {
-    const spans = [...topCard.querySelectorAll("span")];
+    const spans = [...topCard.querySelectorAll("p, span")]; // SDUI puts location in <p>
     for (const s of spans) {
       const t = s.textContent.trim();
       // Location patterns: "City, State", "City, Country", "Greater X Area"
@@ -243,6 +395,7 @@ export function parseLinkedIn() {
       ) || aboutSection.querySelector("span[aria-hidden='true']");
     about = txt(aboutContent);
   }
+  if (!about) about = sduiAbout();                 // SDUI fallback
 
   // ── EXPERIENCE ────────────────────────────────────────────────────────────
   const experience = [];
@@ -309,6 +462,10 @@ export function parseLinkedIn() {
     }
   }
 
+  if (experience.length === 0) {                   // SDUI fallback
+    experience.push(...parseSduiExperience());
+  }
+
   // ── EDUCATION ─────────────────────────────────────────────────────────────
   const education = [];
   const eduSection = findSection("Education");
@@ -351,6 +508,10 @@ export function parseLinkedIn() {
     }
   }
 
+  if (education.length === 0) {                     // SDUI fallback
+    education.push(...parseSduiEducation());
+  }
+
   // ── SKILLS ────────────────────────────────────────────────────────────────
   const skills = [];
   const skillsSection = findSection("Skills");
@@ -374,6 +535,10 @@ export function parseLinkedIn() {
         skills.push(t);
       }
     }
+  }
+
+  if (skills.length === 0) {                        // SDUI fallback
+    skills.push(...parseSduiSkills());
   }
 
   // ── CERTIFICATIONS / LICENSES ─────────────────────────────────────────────

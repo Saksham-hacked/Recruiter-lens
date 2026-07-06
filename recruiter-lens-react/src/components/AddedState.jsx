@@ -3,7 +3,7 @@ import React from "react";
 import { tabAPI } from "../api";
 
 export default function AddedState({ result }) {
-  const { action, zohoRecordUrl, pdfAttached, noteCreated } = result;
+  const { action, zohoRecordUrl, pdfAttached, noteCreated, indeedResumeAttached, indeedResumeError } = result;
 
   return (
     <div className="py-5 px-4 flex flex-col items-center gap-2">
@@ -30,6 +30,18 @@ export default function AddedState({ result }) {
           <p className="text-gray-600 text-xs flex items-center gap-1.5">
             <span className="text-green-500 font-bold">✓</span>
             PDF profile attached
+          </p>
+        )}
+        {indeedResumeAttached === true && (
+          <p className="text-gray-600 text-xs flex items-center gap-1.5">
+            <span className="text-green-500 font-bold">✓</span>
+            Original resume file attached
+          </p>
+        )}
+        {indeedResumeAttached === false && indeedResumeError && (
+          <p className="text-amber-600 text-xs flex items-center gap-1.5">
+            <span className="font-bold">⚠️</span>
+            Original resume couldn't be attached ({indeedResumeError}) — generated summary is still on file
           </p>
         )}
         {noteCreated === true && (

@@ -1,9 +1,10 @@
 // hooks/useAddCandidate.js
 // Manages the add-candidate form state and submission.
+// Sends both user-editable core fields AND all rich parsed data to the backend.
 import { useState } from "react";
 import { candidateAPI } from "../api";
 
-export function useAddCandidate(candidateData) {
+export function useAddCandidate(candidateData, resumeStatus = { state: "none" }) {
   const [formData, setFormData] = useState({
     firstName:       candidateData?.firstName       ?? "",
     lastName:        candidateData?.lastName        ?? "",
@@ -35,12 +36,22 @@ export function useAddCandidate(candidateData) {
       return;
     }
 
+    // Indeed-only: block submit on a stale resume capture rather than
+    // silently sending the backend a presigned URL that's certain to have
+    // expired by the time it tries to fetch it. The recruiter needs to
+    // re-click "Download resume" on the page to refresh the capture.
+    if (resumeStatus.state === "stale") {
+      setError("Resume link expired — click \u201cDownload resume\u201d again on the page, then try again.");
+      return;
+    }
+
     setError(null);
     setIsSubmitting(true);
 
     try {
-      console.log("[Recruiter Lens] Add candidate request sent:", formData);
-      const response = await candidateAPI.addCandidate({
+      // Merge user-editable form fields with all rich parsed data
+      const payload = {
+        // Core fields (user can edit these in the form)
         firstName:       formData.firstName       || null,
         lastName:        formData.lastName,
         email:           formData.email           || null,
@@ -50,7 +61,39 @@ export function useAddCandidate(candidateData) {
         linkedinUrl:     formData.linkedinUrl     || null,
         source:          formData.source,
         notes:           formData.notes           || null,
+
+        // Rich parsed data (passed through from parser, not user-editable)
+        location:         candidateData?.location         || null,
+        skills:           candidateData?.skills           || null,
+        about:            candidateData?.about            || null,
+        experience:       candidateData?.experience       || null,
+        experienceTags:   candidateData?.experienceTags   || null,
+        education:        candidateData?.education        || null,
+        skillCategories:  candidateData?.skillCategories  || null,
+        languages:        candidateData?.languages        || null,
+        githubUrl:        candidateData?.githubUrl        || null,
+        githubProfile:    candidateData?.githubProfile    || null,
+        avgTenure:        candidateData?.avgTenure        || null,
+        currentTenure:    candidateData?.currentTenure    || null,
+        totalExperience:  candidateData?.totalExperience  || null,
+
+        // Indeed real-resume attachment (captured via MAIN-world interceptor
+        // watching the page's own "Download resume" GraphQL call). null when
+        // never captured, captured for a different candidate, or the panel
+        // isn't on Indeed — backend treats this as "no real resume to attach"
+        // and still attaches the generated summary PDF as normal.
+        indeedResumeUrl:  resumeStatus.state === "ready" ? resumeStatus.pdfResumeUrl : null,
+      };
+
+      console.log("[Recruiter Lens] Add candidate request sent:", {
+        ...payload,
+        // Summarize arrays for cleaner logging
+        skills: payload.skills ? `[${payload.skills.length} skills]` : null,
+        experience: payload.experience ? `[${payload.experience.length} entries]` : null,
+        education: payload.education ? `[${payload.education.length} entries]` : null,
       });
+
+      const response = await candidateAPI.addCandidate(payload);
       console.log("[Recruiter Lens] Add candidate response received:", response);
       setResult(response);
     } catch (err) {

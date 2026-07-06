@@ -1,6 +1,7 @@
 // components/NotFoundState.jsx
 import React, { useState } from "react";
 import { useAddCandidate } from "../hooks/useAddCandidate";
+import { useIndeedResumeCapture } from "../hooks/useIndeedResumeCapture";
 import { PLATFORMS } from "../constants";
 import AddedState from "./AddedState";
 
@@ -13,8 +14,19 @@ const INPUT_READONLY =
   "focus:outline-none bg-gray-50 cursor-not-allowed";
 
 export default function NotFoundState({ candidateData }) {
+  // Only Indeed Smart Sourcing candidates have an indeedCandidateId (legacy
+  // Indeed pages, LinkedIn, and Juicebox all leave this null) — that's what
+  // gates the real-resume capture UI and payload field entirely.
+  const isIndeedSmartSourcing =
+    candidateData?.platform === PLATFORMS.INDEED && !!candidateData?.indeedCandidateId;
+
+  const { getStatusForCandidate } = useIndeedResumeCapture();
+  const resumeStatus = isIndeedSmartSourcing
+    ? getStatusForCandidate(candidateData.indeedCandidateId)
+    : { state: "none" };
+
   const { formData, updateField, submit, isSubmitting, result, error } =
-    useAddCandidate(candidateData);
+    useAddCandidate(candidateData, resumeStatus);
 
   const [lastNameTouched, setLastNameTouched] = useState(false);
 
@@ -164,6 +176,34 @@ export default function NotFoundState({ candidateData }) {
         </div>
       </div>
 
+      {/* Indeed-only: real resume capture status */}
+      {isIndeedSmartSourcing && (
+        <div className="mt-3">
+          {resumeStatus.state === "ready" && (
+            <p className="text-green-600 text-xs flex items-start gap-1">
+              <span className="font-bold">✓</span>
+              <span>Original resume file captured — will attach alongside the generated summary.</span>
+            </p>
+          )}
+          {resumeStatus.state === "none" && (
+            <p className="text-amber-600 text-xs flex items-start gap-1">
+              <span>⚠️</span>
+              <span>
+                Original resume not captured yet. Click the ⬇ download icon above and choose
+                “Download resume” to attach the actual file — or add the candidate now with just
+                the generated summary.
+              </span>
+            </p>
+          )}
+          {resumeStatus.state === "stale" && (
+            <p className="text-red-600 text-xs flex items-start gap-1">
+              <span>⚠️</span>
+              <span>Resume link expired — click “Download resume” again on the page before submitting.</span>
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Error from hook */}
       {error && (
         <p className="text-red-500 text-xs mt-2 text-center">{error}</p>
@@ -172,7 +212,7 @@ export default function NotFoundState({ candidateData }) {
       {/* Submit */}
       <button
         onClick={handleSubmit}
-        disabled={isSubmitting}
+        disabled={isSubmitting || resumeStatus.state === "stale"}
         className="mt-3 w-full bg-[#1a1a2e] text-white rounded-xl py-2.5 font-medium
                    text-sm hover:bg-[#2a2a3e] transition-colors disabled:opacity-60
                    disabled:cursor-not-allowed flex items-center justify-center gap-2"
