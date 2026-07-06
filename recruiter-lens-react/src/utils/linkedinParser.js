@@ -13,6 +13,38 @@ function txt(el) {
   return el?.textContent?.trim() || null;
 }
 
+/**
+ * SDUI contact-overlay container. LinkedIn's SDUI contact card does NOT use
+ * role="dialog"; the stable anchor is the componentkey suffix
+ * "ContactInfoDetailSection" (verified against real DOM: this <div> wraps only
+ * the labeled contact rows — Phone / Email / Birthday — while mailto: links in
+ * About / experience prose fall OUTSIDE it). Returns null when the overlay is
+ * not open, so callers get null rather than a stray page value.
+ */
+function sduiContactContainer() {
+  return document.querySelector('[componentkey$="ContactInfoDetailSection"]');
+}
+
+/**
+ * SDUI contact-overlay value lookup by visible label.
+ * Each contact row is two sibling <p> elements:
+ *   <p>Phone</p><p><span>8077977490</span><span> </span>(Work)</p>
+ * Anchored on the label text (stable across deploys) rather than the
+ * Emotion-hashed class names, and scoped to the contact container so stray
+ * page text cannot match. Returns the raw value <p> text or null.
+ */
+function sduiContactValue(label) {
+  const scope = sduiContactContainer();
+  if (!scope) return null;
+  for (const p of scope.querySelectorAll("p")) {
+    if (p.textContent.trim() === label) {
+      const valueEl = p.nextElementSibling;
+      if (valueEl) return valueEl.textContent.trim();
+    }
+  }
+  return null;
+}
+
 /** Find the closest <section> that contains a heading matching a keyword */
 function findSection(keyword) {
   // Classic: sections identified by id like #experience, #education, #skills
@@ -305,9 +337,21 @@ export function parseLinkedIn() {
     return null;
   }
 
-  // ── LINKEDIN URL (strip tracking params) ──────────────────────────────────
+  // ── LINKEDIN URL (canonical /in/<slug> only) ──────────────────────────────
+  // The identity of a profile is origin + "/in/<slug>". LinkedIn appends
+  // sub-routes to the PATH when overlays/detail panes are open — e.g.
+  // "/overlay/contact-info", "/details/experience". Those are view state, not
+  // identity. Stripping only query params + trailing slashes (as before) left
+  // "/overlay/contact-info" in the path, so opening Contact info produced a
+  // different linkedinUrl than the base profile. That dirty URL then (1) got
+  // stored in Zoho's Website field and (2) made the Website-based lookup miss
+  // records saved under the clean URL — the source of the duplicate + the
+  // "not in DB → in DB" flip. Collapse everything after the slug.
   const cleanUrl = new URL(window.location.href);
-  const linkedinUrl = cleanUrl.origin + cleanUrl.pathname.replace(/\/+$/, "");
+  const slugMatch = cleanUrl.pathname.match(/^\/in\/[^/]+/);
+  const linkedinUrl = slugMatch
+    ? cleanUrl.origin + slugMatch[0]
+    : cleanUrl.origin + cleanUrl.pathname.replace(/\/+$/, "");
 
   // ── PROFILE PHOTO ─────────────────────────────────────────────────────────
   let profilePhotoUrl = null;
@@ -746,21 +790,47 @@ export function parseLinkedIn() {
     }
   }
 
-  // Broader email fallback
+  // Email fallback — SCOPED to the contact-info overlay container.
+  // A page-wide mailto: scan is UNSAFE: About / experience prose frequently
+  // contains other mailto: links (recruiting or org addresses) that are NOT
+  // the candidate. A first-match-wins page scan returns whichever appears
+  // first in DOM order and feeds a wrong address into the Zoho lookup.
+  // ContactInfoDetailSection wraps only the labeled contact rows (verified:
+  // prose emails fall outside it), so we read the mailto strictly inside it.
+  // If the overlay is not open we leave email null rather than risk a wrong
+  // address — null is safer than looking up the wrong candidate.
   if (!email) {
-    const mailLinks = document.querySelectorAll('a[href^="mailto:"]');
-    for (const a of mailLinks) {
-      email = a.getAttribute("href").replace("mailto:", "").trim();
-      if (email) break;
+    const container = sduiContactContainer();
+    if (container) {
+      const mailLink = container.querySelector('a[href^="mailto:"]');
+      if (mailLink) {
+        email = mailLink.getAttribute("href").replace("mailto:", "").trim() || null;
+      }
+      // Secondary: label-anchored text, in case the value renders without
+      // a mailto: anchor. Regex-extract so any trailing "(Work)" is dropped.
+      if (!email) {
+        const raw = sduiContactValue("Email");
+        if (raw) email = raw.match(/[\w.+-]+@[\w-]+\.\w+/)?.[0] || null;
+      }
     }
   }
 
-  // Broader phone fallback
+  // Broader phone fallback — classic UI renders phone as a tel: anchor.
   if (!phone) {
     const phoneLinks = document.querySelectorAll('a[href^="tel:"]');
     for (const a of phoneLinks) {
       phone = a.getAttribute("href").replace("tel:", "").trim();
       if (phone) break;
+    }
+  }
+
+  // SDUI overlay fallback — phone is NOT a tel: anchor here; it is plain text
+  // in the value <p> next to the "Phone" label, e.g. "8077977490 (Work)".
+  // Anchor on the label, then strip the trailing type qualifier like "(Work)".
+  if (!phone) {
+    const raw = sduiContactValue("Phone"); // e.g. "8077977490 (Work)"
+    if (raw) {
+      phone = raw.replace(/\s*\([^)]*\)\s*$/, "").trim() || null;
     }
   }
 

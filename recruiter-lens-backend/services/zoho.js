@@ -351,6 +351,21 @@ async function addCandidate(candidateData) {
   if (githubUrl) additionalParts.push(`GitHub: ${githubUrl}`);
   const additionalInfo = additionalParts.join('\n\n') || '';
 
+  // Dedup keys. Email alone let the same LinkedIn profile duplicate whenever
+  // the first push had a blank email (Contact info overlay not opened) and a
+  // later push had it — Zoho can't match on a blank value, so it created a
+  // second record. Add Website (the canonical /in/<slug> URL) so the profile
+  // matches on URL regardless of email state.
+  //
+  // ONLY when linkedinUrl is populated: a blank dedup field must never be a
+  // matching key. Indeed pushes carry no linkedinUrl, so their dedup list
+  // stays ['Email'] exactly as today — working behavior untouched. Juicebox
+  // only gains URL dedup when it has a real profile URL. (Evidence that blank
+  // values don't match: blank-email Indeed candidates don't merge today, which
+  // is why Indeed works — the same reason a blank Website can't false-merge.)
+  const duplicateCheckFields = ['Email'];
+  if (linkedinUrl) duplicateCheckFields.push('Website');
+
   const payload = {
     data: [
       {
@@ -374,7 +389,7 @@ async function addCandidate(candidateData) {
         ...(expYears != null ? { Experience_in_Years: expYears } : {}),
       },
     ],
-    duplicate_check_fields: ['Email'],
+    duplicate_check_fields: duplicateCheckFields,
   };
 
   console.log(`[${new Date().toISOString()}] addCandidate — Zoho payload fields:`,
