@@ -62,6 +62,8 @@ async function mapCandidate(record) {
     candidateStatus: record.Candidate_Status || '',
     source: record.Source || '',
     website: record.Website || '',
+    city: record.City || '',
+    state: record.State || '',
     createdTime: record.Created_Time || '',
     zohoRecordUrl: await buildRecordUrl(record.id),
   };
@@ -87,58 +89,132 @@ function escapeCriteriaValue(value) {
     .replace(/,/g, '\\,');
 }
 
+// ── Name / text normalization for scoring ──────────────────────────────────────
+// Pronoun tokens are stripped because LinkedIn pronoun badges ("She/Her") have
+// historically contaminated name/title fields on certain page variants.
+const PRONOUNS = new Set([
+  'he', 'him', 'his', 'she', 'her', 'hers', 'they', 'them', 'their', 'theirs',
+]);
+
+function normalizeText(s) {
+  if (!s) return '';
+  return String(s)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // strip accents
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')                      // punctuation → space
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenize(s) {
+  return normalizeText(s)
+    .split(' ')
+    .filter((t) => t.length > 2 && !PRONOUNS.has(t));
+}
+
+function tokenOverlap(a, b) {
+  if (!a.length || !b.length) return 0;
+  const setB = new Set(b);
+  let n = 0;
+  for (const t of a) if (setB.has(t)) n++;
+  return n;
+}
+
+// Score a candidate RECORD (mapped) against the PARSED profile. Only used to
+// RANK name-based possible matches — never to auto-accept. Employer overlap is
+// the strongest corroborator available on the lookup payload today; title and
+// location scoring can be added later by threading those fields through the
+// lookup request (frontend → background LOOKUP → lookup route → here).
+function scoreMatch(parsed, record) {
+  return tokenOverlap(tokenize(parsed.currentEmployer), tokenize(record.currentEmployer)) * 3;
+}
+
 /**
  * Search for a candidate in Zoho Recruit.
- * Priority: email > linkedinUrl > phone > (firstName+lastName[+currentEmployer] fallback)
  *
- * The fallback branch only ever runs when email/phone/linkedinUrl are all
- * absent — e.g. Indeed Smart Sourcing, which doesn't expose those fields
- * on the search results view. It does not change behavior for platforms
- * that already provide a primary identifier.
+ * Two tiers of confidence:
+ *   1. UNIQUE identifiers (email → LinkedIn URL → phone). Each PRESENT one is
+ *      tried in priority order; the first hit returns found:true with high
+ *      confidence. Trying every present identifier (not just the first) is what
+ *      lets a LinkedIn page with Contact info open — email present but that
+ *      email not yet on the record — still match on its URL.
+ *   2. NAME fallback. Runs whenever no unique identifier matched AND a name is
+ *      available. Returns ranked possibleMatches at MEDIUM confidence with
+ *      found:false, so the panel asks the recruiter to confirm rather than the
+ *      system auto-merging. This is the cross-platform bridge: an Indeed profile
+ *      whose email is absent from a LinkedIn-sourced record surfaces that record
+ *      here instead of being reported as brand-new (which created duplicates).
+ *
+ * The name query intentionally does NOT filter by Current_Employer — employer
+ * text rarely matches character-for-character across platforms, so filtering on
+ * it turned real matches into zero-result misses. Employer feeds scoreMatch
+ * for RANKING instead, never as a gate.
  */
 async function searchCandidate({ email, phone, linkedinUrl, firstName, lastName, currentEmployer }) {
   const token = await getAccessToken();
   const headers = { Authorization: `Zoho-oauthtoken ${token}` };
 
-  let searchUrl;
+  // Run a search URL → array of raw records (empty array = no match / 204).
+  async function runSearch(searchUrl) {
+    try {
+      const response = await axios.get(searchUrl, { headers });
+      const records = response.data?.data;
+      return Array.isArray(records) ? records : [];
+    } catch (err) {
+      if (err.response?.status === 204 || err.response?.data?.code === 'NO_CONTENT') {
+        return [];
+      }
+      const zohoMsg = err.response?.data?.message || err.message;
+      console.error(`[${new Date().toISOString()}] searchCandidate error:`, zohoMsg);
+      throw new Error(`Zoho search failed: ${zohoMsg}`);
+    }
+  }
 
+  // ── Tier 1: unique identifiers, high confidence ─────────────────────────
+  const primaryAttempts = [];
   if (email) {
-    searchUrl = `${BASE_URL}/Candidates/search?email=${encodeURIComponent(email)}`;
-  } else if (linkedinUrl) {
-    searchUrl = `${BASE_URL}/Candidates/search?criteria=(Website:equals:${encodeURIComponent(escapeCriteriaValue(linkedinUrl))})`;
-  } else if (phone) {
-    searchUrl = `${BASE_URL}/Candidates/search?phone=${encodeURIComponent(phone)}`;
-  } else if (firstName && lastName) {
-    // Name-based fallback. Narrow with Current_Employer when available to
-    // reduce false-positive matches on common names.
-    let criteria = `(First_Name:equals:${encodeURIComponent(escapeCriteriaValue(firstName))})and(Last_Name:equals:${encodeURIComponent(escapeCriteriaValue(lastName))})`;
-    if (currentEmployer) {
-      criteria += `and(Current_Employer:equals:${encodeURIComponent(escapeCriteriaValue(currentEmployer))})`;
-    }
-    searchUrl = `${BASE_URL}/Candidates/search?criteria=${criteria}`;
+    primaryAttempts.push(['email', `${BASE_URL}/Candidates/search?email=${encodeURIComponent(email)}`]);
+  }
+  if (linkedinUrl) {
+    primaryAttempts.push(['url', `${BASE_URL}/Candidates/search?criteria=(Website:equals:${encodeURIComponent(escapeCriteriaValue(linkedinUrl))})`]);
+  }
+  if (phone) {
+    primaryAttempts.push(['phone', `${BASE_URL}/Candidates/search?phone=${encodeURIComponent(phone)}`]);
   }
 
-  try {
-    const response = await axios.get(searchUrl, { headers });
-    const records = response.data?.data;
-
-    if (!Array.isArray(records) || records.length === 0) {
-      return { found: false };
+  for (const [matchType, url] of primaryAttempts) {
+    const records = await runSearch(url);
+    if (records.length > 0) {
+      return {
+        found: true,
+        confidence: 'high',
+        matchType,
+        candidate: await mapCandidate(records[0]),
+      };
     }
-
-    return {
-      found: true,
-      candidate: await mapCandidate(records[0]),
-    };
-  } catch (err) {
-    if (err.response?.status === 204 || err.response?.data?.code === 'NO_CONTENT') {
-      return { found: false };
-    }
-
-    const zohoMsg = err.response?.data?.message || err.message;
-    console.error(`[${new Date().toISOString()}] searchCandidate error:`, zohoMsg);
-    throw new Error(`Zoho search failed: ${zohoMsg}`);
   }
+
+  // ── Tier 2: name fallback, medium confidence (recruiter confirms) ───────
+  if (firstName && lastName) {
+    const criteria = `(First_Name:equals:${encodeURIComponent(escapeCriteriaValue(firstName))})and(Last_Name:equals:${encodeURIComponent(escapeCriteriaValue(lastName))})`;
+    const records = await runSearch(`${BASE_URL}/Candidates/search?criteria=${criteria}`);
+
+    if (records.length > 0) {
+      const mapped = await Promise.all(records.map((r) => mapCandidate(r)));
+      const scored = mapped
+        .map((candidate) => ({ candidate, score: scoreMatch({ currentEmployer }, candidate) }))
+        .sort((a, b) => b.score - a.score);
+
+      return {
+        found: false,
+        confidence: 'medium',
+        possibleMatches: scored.map((s) => ({ ...s.candidate, matchScore: s.score })),
+      };
+    }
+  }
+
+  // ── Nothing anywhere ────────────────────────────────────────────────────
+  return { found: false };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -373,8 +449,8 @@ async function addCandidate(candidateData) {
         Last_Name: lastName,
         Email: email || '',
         Phone: phone || '',
-        Current_Employer: currentEmployer || '',
-        Current_Job_Title: currentTitle || '',
+        Current_Employer: clampField(currentEmployer || '', 100),
+        Current_Job_Title: clampField(currentTitle || '', 100),
         Website: linkedinUrl || '',
         Source: source,
         Candidate_Status: 'New',
@@ -574,4 +650,121 @@ async function createNote(candidateId, noteContent) {
   }
 }
 
-module.exports = { searchCandidate, addCandidate, attachPdfToCandidate, createNote, fetchIndeedResumeBuffer };
+/**
+ * Enrich an EXISTING candidate record in place.
+ *
+ * Called when the recruiter confirms a name-only "possible match" in the panel:
+ * we already know the Zoho record id, so instead of upserting (which would risk
+ * a duplicate when neither email nor Website matches) we backfill ONLY the
+ * fields that are currently blank on that record. Nothing the recruiter already
+ * has is ever overwritten. This is what makes one shared DB across three
+ * platforms get richer over time: a LinkedIn record with no email gains the
+ * Indeed email/phone, so every future encounter matches on a unique identifier.
+ */
+async function updateCandidate(existingCandidateId, candidateData, { dryRun = false } = {}) {
+  const {
+    email, phone, currentEmployer, currentTitle, linkedinUrl,
+    location, skills, totalExperience,
+  } = candidateData;
+
+  const token = await getAccessToken();
+  const headers = {
+    Authorization: `Zoho-oauthtoken ${token}`,
+    'Content-Type': 'application/json',
+  };
+
+  // Fetch the existing record so we only fill BLANK fields.
+  let existing = {};
+  try {
+    const getRes = await axios.get(`${BASE_URL}/Candidates/${existingCandidateId}`, { headers });
+    existing = getRes.data?.data?.[0] || {};
+  } catch (err) {
+    const zohoMsg = err.response?.data?.message || err.message;
+    console.error(`[${new Date().toISOString()}] updateCandidate — could not fetch record ${existingCandidateId}:`, zohoMsg);
+    throw new Error(`Zoho update failed (fetch): ${zohoMsg}`);
+  }
+
+  const isBlank = (v) => v == null || String(v).trim() === '';
+  const fields = {};
+  const enriched = [];
+
+  // Only write when the incoming value is present AND the stored value is blank.
+  const backfill = (apiName, value) => {
+    if (!isBlank(value) && isBlank(existing[apiName])) {
+      fields[apiName] = value;
+      enriched.push({ field: apiName, value });
+    }
+  };
+
+  backfill('Email', email);
+  backfill('Phone', phone);
+  backfill('Current_Employer', clampField(currentEmployer, 100));
+  backfill('Current_Job_Title', clampField(currentTitle, 100));
+  backfill('Website', linkedinUrl);
+
+  const locParts = parseLocation(location);
+  backfill('City', clampField(locParts.city || '', 30));
+  backfill('State', clampField(locParts.state || '', 30));
+  backfill('Country', clampField(locParts.country || '', 30));
+
+  const skillSetStr = (skills && skills.length > 0) ? skills.join(', ') : '';
+  backfill('Skill_Set', skillSetStr);
+
+  const expYears = parseExperienceYears(totalExperience);
+  if (expYears != null) backfill('Experience_in_Years', expYears);
+
+  // Seed Description from rich data only when the existing one is empty — never
+  // clobber a Description the record already carries.
+  if (isBlank(existing.Description)) {
+    const description = buildDescription(candidateData);
+    if (!isBlank(description)) {
+      fields.Description = description;
+      enriched.push({ field: 'Description', value: description });
+    }
+  }
+
+  // Dry run: return the computed diff (field + value that WOULD be written)
+  // without touching Zoho, so the panel can preview it before committing.
+  if (dryRun) {
+    return { preview: true, action: 'preview', enrichedFields: enriched };
+  }
+
+  if (Object.keys(fields).length === 0) {
+    console.log(`[${new Date().toISOString()}] updateCandidate — record ${existingCandidateId} already has every field populated; nothing to enrich`);
+    return {
+      action: 'updated',
+      candidateId: String(existingCandidateId),
+      zohoRecordUrl: await buildRecordUrl(existingCandidateId),
+      enrichedFields: [],
+    };
+  }
+
+  const payload = { data: [{ id: String(existingCandidateId), ...fields }] };
+
+  console.log(`[${new Date().toISOString()}] updateCandidate — enriching record ${existingCandidateId} with: ${enriched.map((e) => e.field).join(', ')}`);
+
+  try {
+    const response = await axios.put(`${BASE_URL}/Candidates`, payload, { headers });
+    const result = response.data?.data?.[0];
+    const code = result?.code;
+
+    if (code !== 'SUCCESS') {
+      console.error(`[${new Date().toISOString()}] updateCandidate — Zoho rejected record:`, JSON.stringify(result));
+      const detailStr = result?.details ? ` (details: ${JSON.stringify(result.details)})` : '';
+      throw new Error(`Zoho update failed with code: ${code} — ${result?.message || ''}${detailStr}`);
+    }
+
+    return {
+      action: 'updated',
+      candidateId: String(existingCandidateId),
+      zohoRecordUrl: await buildRecordUrl(existingCandidateId),
+      enrichedFields: enriched,
+    };
+  } catch (err) {
+    const zohoMsg = err.response?.data?.message || err.message;
+    console.error(`[${new Date().toISOString()}] updateCandidate error:`, zohoMsg);
+    throw new Error(`Zoho updateCandidate failed: ${zohoMsg}`);
+  }
+}
+
+module.exports = { searchCandidate, addCandidate, updateCandidate, attachPdfToCandidate, createNote, fetchIndeedResumeBuffer };

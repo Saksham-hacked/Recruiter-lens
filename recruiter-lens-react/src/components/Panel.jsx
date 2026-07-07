@@ -3,13 +3,14 @@
 import React, { useState } from "react";
 import { useLookup } from "../hooks/useLookup";
 import { useDraggable } from "../hooks/useDraggable";
-import LoadingState  from "./LoadingState";
-import FoundState    from "./FoundState";
-import NotFoundState from "./NotFoundState";
-import ErrorState    from "./ErrorState";
+import LoadingState       from "./LoadingState";
+import FoundState         from "./FoundState";
+import NotFoundState      from "./NotFoundState";
+import PossibleMatchState from "./PossibleMatchState";
+import ErrorState         from "./ErrorState";
 
 export default function Panel() {
-  const { status, candidate, candidateData, error, retry } = useLookup();
+  const { status, candidate, candidateData, possibleMatches, error, retry } = useLookup();
   const [collapsed, setCollapsed] = useState(false);
   const { pos, dragHandlers } = useDraggable();
 
@@ -115,8 +116,11 @@ export default function Panel() {
       {/* ── Body (scrollable) ── */}
       <div className="overflow-y-auto overscroll-contain" style={{ scrollbarWidth: "thin" }}>
         {status === "loading"  && <LoadingState />}
-        {status === "found"    && <FoundState candidate={candidate} />}
+        {status === "found"    && <FoundState candidate={candidate} candidateData={candidateData} />}
         {status === "notFound" && <NotFoundState candidateData={candidateData} />}
+        {status === "possibleMatch" && (
+          <PossibleMatchState candidateData={candidateData} possibleMatches={possibleMatches} />
+        )}
         {status === "error"    && <ErrorState error={error} onRetry={retry} />}
 
         {status === "idle" && (

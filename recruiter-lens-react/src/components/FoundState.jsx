@@ -1,9 +1,13 @@
 // components/FoundState.jsx
 import React from "react";
 import { tabAPI } from "../api";
+import { useAddCandidate } from "../hooks/useAddCandidate";
+import AddedState from "./AddedState";
+import EnrichPreview from "./EnrichPreview";
 
-export default function FoundState({ candidate }) {
+export default function FoundState({ candidate, candidateData }) {
   const {
+    id,
     firstName,
     lastName,
     currentTitle,
@@ -12,6 +16,31 @@ export default function FoundState({ candidate }) {
     createdTime,
     zohoRecordUrl,
   } = candidate;
+
+  // Enrich = backfill the existing record's BLANK fields from what we just
+  // parsed on this page (e.g. found by URL on LinkedIn but the record came
+  // from Indeed with no LinkedIn sections). Backend never overwrites existing
+  // values, so it's safe to offer whenever we're on a real parsed profile.
+  const { submit, reset, isSubmitting, result, error } = useAddCandidate(
+    candidateData || {},
+    { state: "none" }
+  );
+
+  // Two-step: first click previews the diff (dry run); confirm commits.
+  if (result?.preview) {
+    return (
+      <EnrichPreview
+        result={result}
+        isSubmitting={isSubmitting}
+        error={error}
+        onConfirm={() => submit({ existingCandidateId: id })}
+        onCancel={reset}
+      />
+    );
+  }
+
+  // Successful enrich → same confirmation screen as a normal add/update.
+  if (result) return <AddedState result={result} />;
 
   // Format date: "Jan 15, 2024"
   let addedOn = "";
@@ -63,6 +92,21 @@ export default function FoundState({ candidate }) {
       >
         View in Zoho
       </button>
+
+      {candidateData && id && (
+        <button
+          onClick={() => submit({ existingCandidateId: id, preview: true })}
+          disabled={isSubmitting}
+          className="mt-2 w-full border border-gray-300 text-gray-700 rounded-xl py-2
+                     text-sm font-medium hover:bg-gray-50 transition-colors
+                     disabled:opacity-60 disabled:cursor-not-allowed"
+          title="Preview what would be added to this record (nothing is written yet)"
+        >
+          {isSubmitting ? "Checking…" : "Enrich with this page's data"}
+        </button>
+      )}
+
+      {error && <p className="text-red-500 text-xs mt-2 text-center">{error}</p>}
     </div>
   );
 }

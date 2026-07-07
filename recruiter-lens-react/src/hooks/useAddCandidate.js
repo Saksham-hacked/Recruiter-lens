@@ -25,7 +25,10 @@ export function useAddCandidate(candidateData, resumeStatus = { state: "none" })
     setFormData((prev) => ({ ...prev, [field]: value }));
   }
 
-  async function submit() {
+  // overrides.existingCandidateId — set by the "possible match" confirm flow to
+  // enrich an existing record instead of creating a new one. Absent for a
+  // normal new-candidate add.
+  async function submit(overrides = {}) {
     // Validate required fields
     if (!formData.lastName.trim()) {
       setError("Last name is required.");
@@ -83,6 +86,13 @@ export function useAddCandidate(candidateData, resumeStatus = { state: "none" })
         // isn't on Indeed — backend treats this as "no real resume to attach"
         // and still attaches the generated summary PDF as normal.
         indeedResumeUrl:  resumeStatus.state === "ready" ? resumeStatus.pdfResumeUrl : null,
+
+        // Present only when enriching a recruiter-confirmed existing record;
+        // null for normal new-candidate adds. Backend routes on this.
+        existingCandidateId: overrides.existingCandidateId ?? null,
+
+        // preview: ask the backend for the enrichment diff without writing.
+        preview: overrides.preview ?? false,
       };
 
       console.log("[Recruiter Lens] Add candidate request sent:", {
@@ -104,5 +114,10 @@ export function useAddCandidate(candidateData, resumeStatus = { state: "none" })
     }
   }
 
-  return { formData, updateField, submit, isSubmitting, result, error };
+  function reset() {
+    setResult(null);
+    setError(null);
+  }
+
+  return { formData, updateField, submit, reset, isSubmitting, result, error };
 }

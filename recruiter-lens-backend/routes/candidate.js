@@ -1,6 +1,7 @@
 const express = require('express');
 const {
   addCandidate,
+  updateCandidate,
   attachPdfToCandidate,
   createNote,
   fetchIndeedResumeBuffer,
@@ -125,6 +126,12 @@ router.post('/add', async (req, res) => {
     // MAIN-world interceptor when the recruiter clicked "Download resume".
     // null for LinkedIn / Juicebox / legacy Indeed pages.
     indeedResumeUrl = null,
+    // When the recruiter confirms a name-only "possible match" in the panel,
+    // the matched Zoho record id comes back here. Present → enrich that record
+    // in place (backfill blank fields only) instead of creating a new one.
+    existingCandidateId = null,
+    // preview: compute the enrichment diff and return it WITHOUT writing.
+    preview = false,
   } = req.body;
 
   // ── Validation ──────────────────────────────────────────────────────────
@@ -195,11 +202,26 @@ router.post('/add', async (req, res) => {
   };
 
   // ── Step 1: Add / upsert candidate in Zoho ──────────────────────────────
+  // Preview mode: return the field/value diff the enrich WOULD apply, no write.
+  if (existingCandidateId && preview) {
+    try {
+      const previewResult = await updateCandidate(existingCandidateId, fullCandidateData, { dryRun: true });
+      return res.json(previewResult);
+    } catch (err) {
+      console.error(`[${new Date().toISOString()}] /candidate/add — enrich preview failed:`, err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // existingCandidateId set → recruiter confirmed this is an existing person
+  // (a name-only match), so enrich that record in place rather than inserting.
   let zohoResult;
   try {
-    zohoResult = await addCandidate(fullCandidateData);
+    zohoResult = existingCandidateId
+      ? await updateCandidate(existingCandidateId, fullCandidateData)
+      : await addCandidate(fullCandidateData);
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] /candidate/add — Zoho addCandidate failed:`, err.message);
+    console.error(`[${new Date().toISOString()}] /candidate/add — Zoho ${existingCandidateId ? 'updateCandidate' : 'addCandidate'} failed:`, err.message);
     return res.status(500).json({ error: err.message });
   }
 
@@ -211,8 +233,11 @@ router.post('/add', async (req, res) => {
   // we already have the candidate's real Indeed resume, attach that alone
   // and skip generating/attaching the summary — no reason to clutter the
   // record with both.
+  // On the enrich path we don't attach a generated summary — the existing
+  // record already has its own attachments and a fresh summary would just
+  // clutter it. The real Indeed resume (below) still attaches on both paths.
   let pdfAttached = false;
-  if (!indeedResumeBuffer) {
+  if (!indeedResumeBuffer && !existingCandidateId) {
     try {
       const pdfBuffer = await generateCandidatePdf(fullCandidateData);
 
@@ -236,7 +261,7 @@ router.post('/add', async (req, res) => {
     }
   } else {
     console.log(
-      `[${new Date().toISOString()}] /candidate/add — real Indeed resume present, skipping generated summary PDF for candidate ${candidateId}`
+      `[${new Date().toISOString()}] /candidate/add — skipping generated summary PDF for candidate ${candidateId} (${indeedResumeBuffer ? 'real Indeed resume present' : 'enriching existing record'})`
     );
   }
 

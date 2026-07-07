@@ -222,6 +222,7 @@ export function useLookup() {
   const [status, setStatus] = useState("idle");
   const [candidate, setCandidate] = useState(null);
   const [candidateData, setCandidateData] = useState(null);
+  const [possibleMatches, setPossibleMatches] = useState(null);
   const [error, setError] = useState(null);
 
   const lastProcessedUrl = useRef("");
@@ -324,6 +325,7 @@ export function useLookup() {
     // ── 4. Set loading state + icon ───────────────────────────────────────────
     setStatus("loading");
     setCandidate(null);
+    setPossibleMatches(null);
     setError(null);
     iconAPI.updateIcon("loading").catch(() => {});
 
@@ -359,6 +361,12 @@ export function useLookup() {
         setStatus("found");
         setCandidate(response.candidate);
         iconAPI.updateIcon("found").catch(() => {});
+      } else if (response.possibleMatches && response.possibleMatches.length > 0) {
+        // Name-only match(es) at medium confidence — not auto-accepted. The
+        // panel asks the recruiter to confirm before enriching.
+        setStatus("possibleMatch");
+        setPossibleMatches(response.possibleMatches);
+        iconAPI.updateIcon("notfound").catch(() => {});
       } else {
         setStatus("notFound");
         iconAPI.updateIcon("notfound").catch(() => {});
@@ -414,5 +422,5 @@ export function useLookup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { status, candidate, candidateData, error, retry };
+  return { status, candidate, candidateData, possibleMatches, error, retry };
 }
