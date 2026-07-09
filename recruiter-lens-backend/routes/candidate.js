@@ -3,6 +3,8 @@ const {
   addCandidate,
   updateCandidate,
   attachPdfToCandidate,
+  attachFileToCandidate,
+  convertPdfToDocx,
   createNote,
   fetchIndeedResumeBuffer,
 } = require('../services/zoho');
@@ -297,6 +299,46 @@ router.post('/add', async (req, res) => {
     }
   }
 
+  // ── Step 3c: Attach a .docx copy of the real Indeed resume ──────────────
+  // Alongside the original PDF (attached above), also attach a Word (.docx)
+  // copy so recruiters who need an editable format have one. Text-level
+  // conversion only — the PDF above stays the full-fidelity original. Attached
+  // under the 'Others' category: Zoho rejects an empty attachments_category
+  // (MANDATORY_PARAM_MISSING), and the 'Resume' category is already taken by
+  // the PDF (one attachment per category per candidate). Independent try/catch
+  // — a conversion failure must never undo the PDF attach that already
+  // succeeded above.
+  let indeedResumeDocxAttached = false;
+  if (indeedResumeBuffer) {
+    try {
+      const docxBuffer = await convertPdfToDocx(indeedResumeBuffer);
+
+      const docxFilename = `${firstName || 'candidate'}_${lastName}_resume.docx`
+        .replace(/\s+/g, '_')
+        .replace(/[^a-zA-Z0-9._-]/g, '');
+
+      console.log(
+        `[${new Date().toISOString()}] /candidate/add — attaching .docx resume copy "${docxFilename}" (${docxBuffer.length} bytes) to candidate ${candidateId}`
+      );
+      await attachFileToCandidate(
+        candidateId,
+        docxBuffer,
+        docxFilename,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Others'
+      );
+      indeedResumeDocxAttached = true;
+      console.log(
+        `[${new Date().toISOString()}] /candidate/add — .docx resume copy attached OK for candidate ${candidateId}`
+      );
+    } catch (err) {
+      console.error(
+        `[${new Date().toISOString()}] /candidate/add — .docx resume conversion/attach failed:`,
+        err.message
+      );
+    }
+  }
+
   // ── Step 4: Create note if provided ─────────────────────────────────────
   let noteCreated = false;
   if (notes && notes.trim().length > 0) {
@@ -327,6 +369,7 @@ router.post('/add', async (req, res) => {
     pdfAttached,
     noteCreated,
     indeedResumeAttached,
+    indeedResumeDocxAttached,
     indeedResumeError,
   });
 });

@@ -11,6 +11,7 @@
     "@supabase/supabase-js": "^2.43.4",
     "axios": "^1.7.2",
     "cors": "^2.8.5",
+    "docx": "^9.0.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",

@@ -1,0 +1,87 @@
+# =============================================================================
+# CI/CD: build the backend image and deploy it to EC2 on every push to main.
+#
+# This is the "git push -> it updates on AWS, like Render" pipeline.
+# It only runs when backend files change (path filter below), so frontend-only
+# commits don't redeploy the server. You can also run it manually from the
+# Actions tab (workflow_dispatch).
+#
+# Requires these repository secrets (Settings -> Secrets and variables ->
+# Actions). See DEPLOY.md, Part C:
+#   EC2_HOST     - public IP or DuckDNS hostname of the server
+#   EC2_USER     - ssh user (ubuntu)
+#   EC2_SSH_KEY  - the PRIVATE key that matches the EC2 key pair
+#   GHCR_USER    - your GitHub username
+#   GHCR_PAT     - a GitHub PAT with read:packages (used by the server to pull)
+# =============================================================================
+
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "recruiter-lens-backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch: {}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.img.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # GHCR image names must be lowercase; your owner name might not be.
+      - name: Compute lowercase image name
+        id: img
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${owner}/recruiter-lens-backend" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # platforms: linux/amd64 is important — it makes the build install the
+      # x86_64 native canvas binary that pdf-parse needs, matching the x64
+      # (t3.small) EC2 instance. Building for the wrong arch = runtime crash.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./recruiter-lens-backend
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.img.outputs.image }}:latest
+            ${{ steps.img.outputs.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull new image on the server and restart
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/recruiter-lens/recruiter-lens-backend/deploy
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d
+            docker image prune -f

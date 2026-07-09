@@ -767,4 +767,118 @@ async function updateCandidate(existingCandidateId, candidateData, { dryRun = fa
   }
 }
 
-module.exports = { searchCandidate, addCandidate, updateCandidate, attachPdfToCandidate, createNote, fetchIndeedResumeBuffer };
+/**
+ * Convert a PDF resume buffer into a .docx buffer.
+ *
+ * Pure-JS pipeline: extract the PDF's text with pdf-parse (same dual v1/v2
+ * export-shape handling used in extractContactFromResume), then rebuild it as
+ * a Word document with the `docx` library. This is a TEXT-level conversion —
+ * it produces a searchable, editable .docx of the resume's text content, not a
+ * pixel-perfect layout clone (no pure-JS library reliably reproduces PDF
+ * layout). The original PDF is still attached alongside it for full fidelity.
+ *
+ * Throws on failure so the caller can log and skip the .docx without disturbing
+ * the PDF attachment that already succeeded.
+ */
+async function convertPdfToDocx(pdfBuffer) {
+  // ── Extract text (dual pdf-parse API shape — mirrors extractContactFromResume) ──
+  const pdfParseModule = require('pdf-parse');
+  let text = '';
+
+  if (typeof pdfParseModule === 'function') {
+    // v1.x — callable function, returns { text }
+    const parsed = await pdfParseModule(pdfBuffer);
+    text = parsed?.text || '';
+  } else if (pdfParseModule?.PDFParse) {
+    // v2.x — class-based API
+    const parser = new pdfParseModule.PDFParse({ data: pdfBuffer });
+    try {
+      const parsed = await parser.getText();
+      text = parsed?.text || '';
+    } finally {
+      await parser.destroy().catch(() => {});
+    }
+  } else if (typeof pdfParseModule?.default === 'function') {
+    const parsed = await pdfParseModule.default(pdfBuffer);
+    text = parsed?.text || '';
+  } else {
+    throw new Error(
+      `Unrecognized pdf-parse export shape: ${Object.keys(pdfParseModule || {}).join(', ') || '(none)'}`
+    );
+  }
+
+  if (!text.trim()) {
+    throw new Error('No extractable text in PDF (scanned/image-only resume?)');
+  }
+
+  // ── Rebuild as .docx ────────────────────────────────────────────────────
+  const { Document, Packer, Paragraph, TextRun } = require('docx');
+
+  // One Paragraph per line; blank lines become empty paragraphs so the
+  // resume's vertical spacing is roughly preserved.
+  const paragraphs = text.split(/\r?\n/).map(
+    (line) => new Paragraph({ children: [new TextRun(line)] })
+  );
+
+  const doc = new Document({ sections: [{ children: paragraphs }] });
+
+  return Packer.toBuffer(doc);
+}
+
+/**
+ * Attach an arbitrary file buffer to a candidate's record.
+ *
+ * Generic sibling of attachPdfToCandidate — same Zoho endpoint and the same
+ * one-attachment-per-category constraint, but the caller supplies the MIME type
+ * so non-PDF files (e.g. the .docx resume copy) attach with the correct content
+ * type. attachPdfToCandidate is left untouched for the existing PDF path.
+ */
+async function attachFileToCandidate(candidateId, fileBuffer, filename, mimeType, category = null) {
+  const token = await getAccessToken();
+
+  const form = new FormData();
+  form.append('file', fileBuffer, {
+    filename,
+    contentType: mimeType,
+  });
+  if (category) {
+    form.append('attachments_category', category);
+  }
+
+  try {
+    const response = await axios.post(
+      `${BASE_URL}/Candidates/${candidateId}/Attachments`,
+      form,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${token}`,
+          ...form.getHeaders(),
+        },
+      }
+    );
+
+    const result = response.data?.data?.[0];
+    const code = result?.code;
+
+    console.log(
+      `[${new Date().toISOString()}] attachFileToCandidate — candidate ${candidateId}, file "${filename}" (${mimeType}) — Zoho response:`,
+      JSON.stringify(response.data)
+    );
+
+    if (code && code !== 'SUCCESS') {
+      throw new Error(`Zoho rejected attachment (${code}): ${result?.message || 'no message'}`);
+    }
+
+    return true;
+  } catch (err) {
+    const zohoMsg = err.response?.data?.message || err.message;
+    console.error(
+      `[${new Date().toISOString()}] attachFileToCandidate error — candidate ${candidateId}, file "${filename}":`,
+      zohoMsg,
+      err.response?.data ? JSON.stringify(err.response.data) : '(no response body)'
+    );
+    throw new Error(`File attachment failed: ${zohoMsg}`);
+  }
+}
+
+module.exports = { searchCandidate, addCandidate, updateCandidate, attachPdfToCandidate, attachFileToCandidate, convertPdfToDocx, createNote, fetchIndeedResumeBuffer };

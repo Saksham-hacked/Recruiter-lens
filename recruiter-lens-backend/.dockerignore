@@ -1,0 +1,30 @@
+# Dependencies are installed fresh inside the image (npm ci). Never copy the
+# host's node_modules in — it may contain the wrong-architecture native binary.
+node_modules
+
+# NEVER bake secrets into the image. Env vars are injected at runtime
+# (docker run --env-file / -e, or the platform's secret store), not built in.
+.env
+.env.*
+
+# Git / CI metadata — not needed in the runtime image
+.git
+.gitignore
+.github
+
+# The Docker files themselves
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.override.yml
+
+# Docs / editor / OS cruft
+README.md
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs

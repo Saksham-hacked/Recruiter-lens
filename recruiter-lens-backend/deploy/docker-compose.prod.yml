@@ -1,0 +1,47 @@
+# =============================================================================
+# Production stack — runs on the EC2 server (NOT your laptop).
+#
+# Two containers:
+#   backend : the image CI built and pushed to GHCR
+#   caddy   : reverse proxy providing automatic HTTPS (Let's Encrypt)
+#
+# All values come from a .env file in THIS directory (deploy/.env), which you
+# create on the server (see DEPLOY.md, Part A4). That .env holds both the app
+# secrets AND these three deploy values:
+#   IMAGE       e.g. ghcr.io/<your-gh-username>/recruiter-lens-backend
+#   DOMAIN      e.g. recruiterlens.duckdns.org
+#   ACME_EMAIL  your email (Let's Encrypt expiry notices)
+#
+# Start:   docker compose -f docker-compose.prod.yml up -d
+# Logs:    docker compose -f docker-compose.prod.yml logs -f backend
+# =============================================================================
+
+services:
+  backend:
+    image: ${IMAGE}:latest
+    env_file:
+      - .env
+    expose:
+      - "3000" # internal to the Docker network only; not exposed to the internet
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # persists the issued certificate across restarts
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

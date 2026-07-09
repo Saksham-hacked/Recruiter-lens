@@ -1,0 +1,22 @@
+# =============================================================================
+# Local testing convenience — NOT used in production deployment.
+#
+# Lets you build and run the containerised backend on your own machine exactly
+# as it will run on the server, using your existing .env for configuration:
+#
+#     docker compose up --build
+#
+# Then hit http://localhost:3000/health to confirm it's alive. Ctrl+C to stop.
+#
+# Requires Docker Desktop running on Windows.
+# =============================================================================
+
+services:
+  backend:
+    build: .
+    image: recruiter-lens-backend:local
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    restart: unless-stopped

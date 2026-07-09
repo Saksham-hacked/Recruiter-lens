@@ -1,0 +1,12 @@
+# =============================================================================
+# Caddy reverse proxy config.
+# Gives {$DOMAIN} automatic HTTPS (Let's Encrypt) and forwards traffic to the
+# backend container on the internal Docker network. {$DOMAIN} and {$ACME_EMAIL}
+# are read from environment variables set in docker-compose.prod.yml (.env).
+# =============================================================================
+
+{$DOMAIN} {
+    encode gzip
+    reverse_proxy backend:3000
+    tls {$ACME_EMAIL}
+}
