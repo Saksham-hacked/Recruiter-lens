@@ -454,6 +454,7 @@ async function addCandidate(candidateData) {
         Website: linkedinUrl || '',
         Source: source,
         Candidate_Status: 'New',
+        Time_Zone: 'Asia/Kolkata',
 
         // ── New standard field mappings ────────────────────────────────────
         Skill_Set: skillSetStr,
