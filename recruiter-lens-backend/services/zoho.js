@@ -458,7 +458,7 @@ async function addCandidate(candidateData) {
 
         // ── Mandatory custom fields — defaults when not parsed ────────────
         Profession: 'NA',
-        Specialities: '-None-',
+        Specialities: ['-None-'],
         Qualification: 'Dont Know',
         WT_Source: source || 'Added by User',
 
