@@ -1,6 +1,6 @@
 // popup.js — plain JS, no React, no bundler
 
-const BACKEND_URL = "http://localhost:3000"; // keep in sync with background.js
+const BACKEND_URL = "https://recruiterlens.duckdns.org"; // keep in sync with background.js
 
 async function init() {
   const dotEl         = document.getElementById("status-dot");

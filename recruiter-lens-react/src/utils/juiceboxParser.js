@@ -443,6 +443,9 @@ function parseSidebar(sidebar) {
       const t = txt(el);
       if (!t) continue;
       if (!email && t.includes("@") && t.includes(".")) {
+        // Skip container elements — their textContent concatenates children
+        // and prepends nearby label text to the email (e.g. "statusContactdr.mgabriel@gmail.com")
+        if (el.children.length > 0) continue;
         const m = t.match(/[\w.+-]+@[\w.-]+\.\w{2,}/);
         if (m) email = m[0];
       }

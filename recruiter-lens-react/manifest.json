@@ -16,6 +16,7 @@
     "https://www.indeed.com/*",
     "https://resumes.indeed.com/*",
     "https://app.juicebox.ai/*",
+    "https://recruiterlens.duckdns.org/*",
     "http://localhost:3000/*"
   ],
   "background": {

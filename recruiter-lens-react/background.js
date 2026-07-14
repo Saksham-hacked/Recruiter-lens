@@ -1,7 +1,7 @@
 // background.js — Root level, NOT bundled by webpack
 // Matches the exact listener pattern from expense-manager's background.js
 
-const BACKEND_URL = "http://localhost:3000"; // TODO: replace with production URL before deploying to AWS
+const BACKEND_URL = "https://recruiterlens.duckdns.org"; // TODO: replace with production URL before deploying to AWS
 const API_KEY = "welcome123";         // TODO: must match API_KEY in backend .env exactly
 
 console.log("[Recruiter Lens] Background service worker started");

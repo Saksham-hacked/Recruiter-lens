@@ -1,10 +1,10 @@
 // constants.js — shared across all src files
 
-export const BACKEND_URL = "http://localhost:3000";
-// TODO: replace with production URL before deploying to AWS
+export const BACKEND_URL = "https://recruiterlens.duckdns.org";
+// Production backend (AWS EC2 + Caddy HTTPS). Keep in sync with background.js and popup.js.
 
-export const API_KEY = "your-api-key-here";
-// TODO: must match API_KEY in backend .env exactly
+export const API_KEY = "welcome123";
+// must match API_KEY in backend .env exactly
 
 export const ZOHO_RECORD_BASE =
   "https://recruit.zoho.in/recruit/TabGenerate.do?module=Candidates&id=";
