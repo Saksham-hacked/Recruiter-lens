@@ -452,14 +452,20 @@ async function addCandidate(candidateData) {
         Current_Employer: clampField(currentEmployer || '', 100),
         Current_Job_Title: clampField(currentTitle || '', 100),
         Website: linkedinUrl || '',
-        Source: source,
+        Source: source || 'Added by User',
         Candidate_Status: 'New',
-        Time_Zone: 'Asia/Kolkata',
+        Time_Zone: 'EST',
+
+        // ── Mandatory custom fields — defaults when not parsed ────────────
+        Profession: 'NA',
+        Specialities: '-None-',
+        Qualification: 'Dont Know',
+        WT_Source: source || 'Added by User',
 
         // ── New standard field mappings ────────────────────────────────────
         Skill_Set: skillSetStr,
         City: clampField(locParts.city || '', 30),
-        State: clampField(locParts.state || '', 30),
+        State: clampField(locParts.state || 'N/A', 30),
         Country: clampField(locParts.country || '', 30),
         Additional_Info: additionalInfo,
         Description: description,
