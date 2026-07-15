@@ -56,7 +56,7 @@ async function mapCandidate(record) {
     firstName: record.First_Name || '',
     lastName: record.Last_Name || '',
     email: record.Email || '',
-    phone: record.Phone || '',
+    phone: record.Mobile || '',
     currentEmployer: record.Current_Employer || '',
     currentTitle: record.Current_Job_Title || '',
     candidateStatus: record.Candidate_Status || '',
@@ -448,7 +448,7 @@ async function addCandidate(candidateData) {
         First_Name: firstName || '',
         Last_Name: lastName,
         Email: email || '',
-        Phone: phone || '',
+        Mobile: phone || '',
         Current_Employer: clampField(currentEmployer || '', 100),
         Current_Job_Title: clampField(currentTitle || '', 100),
         Website: linkedinUrl || '',
@@ -704,7 +704,7 @@ async function updateCandidate(existingCandidateId, candidateData, { dryRun = fa
   };
 
   backfill('Email', email);
-  backfill('Phone', phone);
+  backfill('Mobile', phone);
   backfill('Current_Employer', clampField(currentEmployer, 100));
   backfill('Current_Job_Title', clampField(currentTitle, 100));
   backfill('Website', linkedinUrl);
