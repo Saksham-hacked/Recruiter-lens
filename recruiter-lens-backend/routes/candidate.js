@@ -128,6 +128,10 @@ router.post('/add', async (req, res) => {
     // MAIN-world interceptor when the recruiter clicked "Download resume".
     // null for LinkedIn / Juicebox / legacy Indeed pages.
     indeedResumeUrl = null,
+    // Juicebox PDF export — signed GCS URL captured by the MutationObserver
+    // watching for the "Download Now" toast. 72-hour expiry.
+    // null for LinkedIn / Indeed pages.
+    juiceboxResumeUrl = null,
     // When the recruiter confirms a name-only "possible match" in the panel,
     // the matched Zoho record id comes back here. Present → enrich that record
     // in place (backfill blank fields only) instead of creating a new one.
@@ -162,6 +166,28 @@ router.post('/add', async (req, res) => {
   // and the normal create-with-generated-summary flow proceeds untouched.
   let indeedResumeBuffer = null;
   let indeedResumeError = null;
+
+  // Juicebox PDF export — same pattern, different source.
+  let juiceboxResumeBuffer = null;
+  let juiceboxResumeError = null;
+
+  if (juiceboxResumeUrl) {
+    try {
+      // Reuse the same presigned-URL fetcher — it's just an axios GET that
+      // returns an arraybuffer. The error messages say "Indeed" in the logs
+      // but functionally it works for any signed URL.
+      juiceboxResumeBuffer = await fetchIndeedResumeBuffer(juiceboxResumeUrl);
+      console.log(
+        `[${new Date().toISOString()}] /candidate/add — Juicebox PDF export fetched (${juiceboxResumeBuffer.length} bytes)`
+      );
+    } catch (err) {
+      juiceboxResumeError = err.message;
+      console.error(
+        `[${new Date().toISOString()}] /candidate/add — Juicebox PDF export fetch failed:`,
+        err.message
+      );
+    }
+  }
 
   if (indeedResumeUrl) {
     try {
@@ -232,14 +258,15 @@ router.post('/add', async (req, res) => {
   // ── Step 2 + 3: Generate PDF and attach it (ONLY when there's no real
   // resume) ─────────────────────────────────────────────────────────────
   // The generated summary is a fallback stand-in for an actual resume. If
-  // we already have the candidate's real Indeed resume, attach that alone
-  // and skip generating/attaching the summary — no reason to clutter the
-  // record with both.
+  // we already have the candidate's real resume (Indeed or Juicebox), attach
+  // that alone and skip generating/attaching the summary — no reason to
+  // clutter the record with both.
   // On the enrich path we don't attach a generated summary — the existing
   // record already has its own attachments and a fresh summary would just
-  // clutter it. The real Indeed resume (below) still attaches on both paths.
+  // clutter it. The real resume (below) still attaches on both paths.
+  const hasRealResume = !!(indeedResumeBuffer || juiceboxResumeBuffer);
   let pdfAttached = false;
-  if (!indeedResumeBuffer && !existingCandidateId) {
+  if (!hasRealResume && !existingCandidateId) {
     try {
       const pdfBuffer = await generateCandidatePdf(fullCandidateData);
 
@@ -263,7 +290,7 @@ router.post('/add', async (req, res) => {
     }
   } else {
     console.log(
-      `[${new Date().toISOString()}] /candidate/add — skipping generated summary PDF for candidate ${candidateId} (${indeedResumeBuffer ? 'real Indeed resume present' : 'enriching existing record'})`
+      `[${new Date().toISOString()}] /candidate/add — skipping generated summary PDF for candidate ${candidateId} (${hasRealResume ? 'real resume present' : 'enriching existing record'})`
     );
   }
 
@@ -339,6 +366,65 @@ router.post('/add', async (req, res) => {
     }
   }
 
+  // ── Step 3d: Attach the Juicebox PDF export ────────────────────────────
+  // Same pattern as Indeed: attach as Resume category, then create a .docx
+  // copy under Others.
+  let juiceboxResumeAttached = false;
+  if (juiceboxResumeBuffer) {
+    try {
+      const resumeFilename = `${firstName || 'candidate'}_${lastName}_juicebox_profile.pdf`
+        .replace(/\s+/g, '_')
+        .replace(/[^a-zA-Z0-9._-]/g, '');
+
+      console.log(
+        `[${new Date().toISOString()}] /candidate/add — attaching Juicebox PDF export "${resumeFilename}" (${juiceboxResumeBuffer.length} bytes) to candidate ${candidateId}`
+      );
+      await attachPdfToCandidate(candidateId, juiceboxResumeBuffer, resumeFilename, 'Resume');
+      juiceboxResumeAttached = true;
+      console.log(
+        `[${new Date().toISOString()}] /candidate/add — Juicebox PDF export attached OK for candidate ${candidateId}`
+      );
+    } catch (err) {
+      juiceboxResumeError = err.message;
+      console.error(
+        `[${new Date().toISOString()}] /candidate/add — Juicebox PDF export attach failed:`,
+        err.message
+      );
+    }
+  }
+
+  // ── Step 3e: Attach a .docx copy of the Juicebox PDF export ─────────────
+  let juiceboxResumeDocxAttached = false;
+  if (juiceboxResumeBuffer) {
+    try {
+      const docxBuffer = await convertPdfToDocx(juiceboxResumeBuffer);
+
+      const docxFilename = `${firstName || 'candidate'}_${lastName}_juicebox_profile.docx`
+        .replace(/\s+/g, '_')
+        .replace(/[^a-zA-Z0-9._-]/g, '');
+
+      console.log(
+        `[${new Date().toISOString()}] /candidate/add — attaching Juicebox .docx copy "${docxFilename}" (${docxBuffer.length} bytes) to candidate ${candidateId}`
+      );
+      await attachFileToCandidate(
+        candidateId,
+        docxBuffer,
+        docxFilename,
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Others'
+      );
+      juiceboxResumeDocxAttached = true;
+      console.log(
+        `[${new Date().toISOString()}] /candidate/add — Juicebox .docx copy attached OK for candidate ${candidateId}`
+      );
+    } catch (err) {
+      console.error(
+        `[${new Date().toISOString()}] /candidate/add — Juicebox .docx conversion/attach failed:`,
+        err.message
+      );
+    }
+  }
+
   // ── Step 4: Create note if provided ─────────────────────────────────────
   let noteCreated = false;
   if (notes && notes.trim().length > 0) {
@@ -371,6 +457,9 @@ router.post('/add', async (req, res) => {
     indeedResumeAttached,
     indeedResumeDocxAttached,
     indeedResumeError,
+    juiceboxResumeAttached,
+    juiceboxResumeDocxAttached,
+    juiceboxResumeError,
   });
 });
 
