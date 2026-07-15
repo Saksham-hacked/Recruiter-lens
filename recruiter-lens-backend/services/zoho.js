@@ -574,7 +574,7 @@ async function fetchIndeedResumeBuffer(presignedUrl) {
  * attachment (used for the generated summary); pass 'Resume' explicitly
  * for the candidate's actual resume file.
  */
-async function attachPdfToCandidate(candidateId, pdfBuffer, filename, category = null) {
+async function attachPdfToCandidate(candidateId, pdfBuffer, filename, category = 'Others') {
   const token = await getAccessToken();
 
   const form = new FormData();
@@ -840,7 +840,7 @@ async function convertPdfToDocx(pdfBuffer) {
  * so non-PDF files (e.g. the .docx resume copy) attach with the correct content
  * type. attachPdfToCandidate is left untouched for the existing PDF path.
  */
-async function attachFileToCandidate(candidateId, fileBuffer, filename, mimeType, category = null) {
+async function attachFileToCandidate(candidateId, fileBuffer, filename, mimeType, category = 'Others') {
   const token = await getAccessToken();
 
   const form = new FormData();
